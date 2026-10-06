@@ -331,7 +331,7 @@ async def ask_rag(interaction: discord.Interaction, query: str):
 
     # 디스코드 임베드 카드 생성
     embed = discord.Embed(
-        title="💬 AI 채선우의 답변",
+        title="💬 AI의 답변",
         description=fallback_notice + answer,
         color=discord.Color.gold() if is_fallback else discord.Color.blue()
     )
