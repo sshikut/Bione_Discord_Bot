@@ -329,6 +329,7 @@ async def ask_rag(interaction: discord.Interaction, query: str):
     answer, used_model, is_fallback = query_groq(query, system_instruction)
     fallback_notice = f"⚠️ [안내] 기본 모델 한도 초과로 대체 모델(`{used_model}`)이 사용되었습니다.\n\n" if is_fallback else ""
 
+    # 디스코드 임베드 카드 생성
     embed = discord.Embed(
         title="💬 AI 채선우의 답변",
         description=fallback_notice + answer,
@@ -336,9 +337,16 @@ async def ask_rag(interaction: discord.Interaction, query: str):
     )
     embed.add_field(name="질문", value=f"`{query}`", inline=False)
     
-    footer_text = f"엔진: {used_model}"
+    # 🌿 브랜치 및 참조 파일 명시 필드 추가
     if matched_path:
-        footer_text += f" | {matched_path}"
+        embed.add_field(
+            name="🌿 참조 브랜치 및 소스",
+            value=f"`{target_branch}` 브랜치 | `{matched_path}`",
+            inline=False
+        )
+
+    # 푸터 구성: 모델명 | 브랜치 정보
+    footer_text = f"엔진: {used_model} | 브랜치: {target_branch}"
     embed.set_footer(text=footer_text)
 
     await interaction.followup.send(embed=embed)
