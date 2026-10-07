@@ -35,14 +35,18 @@ tree = app_commands.CommandTree(bot)
 
 # --- Discord 봇 백그라운드 구동 래퍼 (로그 확인 및 크래시 추적) ---
 async def run_discord_bot():
-    try:
-        print("[Bot Init] 디스코드 봇 로그인을 시도합니다...")
-        if not DISCORD_BOT_TOKEN:
-            print("[Bot Error] DISCORD_BOT_TOKEN 환경 변수가 설정되지 않았습니다!")
-            return
-        await bot.start(DISCORD_BOT_TOKEN, reconnect=True)
-    except Exception as e:
-        print(f"[Bot Critical Error] 디스코드 봇 구동 중 예외 발생: {e}")
+    while True:
+        try:
+            print("[Bot Init] 디스코드 봇 로그인을 시도합니다...")
+            if not DISCORD_BOT_TOKEN:
+                print("[Bot Error] DISCORD_BOT_TOKEN 환경 변수가 설정되지 않았습니다!")
+                return
+            await bot.start(DISCORD_BOT_TOKEN, reconnect=True)
+            break
+        except Exception as e:
+            print(f"[Bot Warning] 로그인 지연 또는 차단(429) 감지: {e}")
+            print("[Bot Retry] 60초 후 다시 로그인을 시도합니다...")
+            await asyncio.sleep(60)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
