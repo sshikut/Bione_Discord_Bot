@@ -41,32 +41,12 @@ def get_github_headers():
     return headers
 
 def fetch_all_branches() -> list[dict]:
+    """저장소의 모든 브랜치 목록 반환"""
     url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/branches"
-    try:
-        resp = requests.get(url, headers=get_github_headers(), timeout=5)
-        if resp.status_code == 200:
-            return resp.json()
-    except Exception as e:
-        print(f"[Warn] fetch_all_branches 파싱 실패: {e}")
+    resp = requests.get(url, headers=get_github_headers())
+    if resp.status_code == 200:
+        return resp.json()
     return []
-
-def fetch_recent_commits(branch_name: str, count: int = 5) -> str:
-    url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/commits?sha={branch_name}&per_page={count}"
-    try:
-        resp = requests.get(url, headers=get_github_headers(), timeout=5)
-        if resp.status_code == 200:
-            commits = resp.json()
-            result = []
-            for c in commits:
-                sha = c.get("sha", "")[:7]
-                author = c.get("commit", {}).get("author", {}).get("name", "Unknown")
-                date = c.get("commit", {}).get("author", {}).get("date", "")[:10]
-                message = c.get("commit", {}).get("message", "").strip().split("\n")[0]
-                result.append(f"- [{sha}] {message} (작업자: {author}, 일자: {date})")
-            return "\n".join(result)
-    except Exception as e:
-        print(f"[Warn] fetch_recent_commits 파싱 실패: {e}")
-    return "커밋 내역을 불러오지 못했습니다."
 
 def detect_target_branch(query: str, available_branches: list[str]) -> str:
     """사용자 질문에서 브랜치명이 언급되었는지 감지 (없으면 GITHUB_DEFAULT_BRANCH)"""
@@ -111,15 +91,14 @@ DOMAIN_KEYWORD_MAP = {
 }
 
 def search_relevant_script(query: str, target_branch: str) -> tuple[str, str, list[str]]:
+    """
+    질문과 브랜치 기반으로 최적의 C# 스크립트 1개를 탐색.
+    반환값: (매칭된 파일경로, 파일내용, 전체C#파일목록)
+    """
     tree_url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/git/trees/{target_branch}?recursive=1"
-    try:
-        resp = requests.get(tree_url, headers=get_github_headers(), timeout=5)
-        if resp.status_code != 200:
-            return "", "", []
-        tree_data = resp.json().get("tree", [])
-        all_cs_files = [item["path"] for item in tree_data if item.get("path", "").endswith(".cs")]
-    except Exception as e:
-        print(f"[Warn] search_relevant_script Trees 파싱 실패: {e}")
+    resp = requests.get(tree_url, headers=get_github_headers())
+    if resp.status_code != 200:
+        print(f"[Fetch Error] Trees API 실패 ({resp.status_code}) on branch {target_branch}")
         return "", "", []
 
     all_cs_files = [item["path"] for item in resp.json().get("tree", []) if item["path"].endswith(".cs")]
