@@ -8,7 +8,6 @@ from dotenv import load_dotenv
 import discord
 from discord import app_commands
 from groq import Groq
-from contextlib import asynccontextmanager
 
 load_dotenv()
 
@@ -32,17 +31,7 @@ bot = discord.Client(
     heartbeat_timeout=60.0
 )
 tree = app_commands.CommandTree(bot)
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # 1. FastAPI 서버가 포트를 열고 기동될 때 디스코드 봇을 백그라운드 태스크로 시작
-    bot_task = asyncio.create_task(bot.start(DISCORD_BOT_TOKEN, reconnect=True))
-    yield
-    # 서버 종료 시 봇 정리
-    await bot.close()
-    bot_task.cancel()
-
-app = FastAPI(lifespan=lifespan)
+app = FastAPI()
 
 # --- GitHub REST API 헬퍼 함수 ---
 
@@ -488,11 +477,16 @@ async def main():
         app=app, 
         host="0.0.0.0", 
         port=PORT, 
-        log_level="info",
+        log_level="warning",
         access_log=False
     )
     server = uvicorn.Server(config)
-    await server.serve()
+    
+    # 1. FastAPI 웹 서버를 백그라운드 태스크로 즉시 실행하여 Render 배포 헬스체크 통과
+    asyncio.create_task(server.serve())
+    
+    # 2. 디스코드 봇 구동 (네트워크 단절 시 자동 재접속 보장)
+    await bot.start(DISCORD_BOT_TOKEN, reconnect=True)
 
 if __name__ == "__main__":
     asyncio.run(main())
