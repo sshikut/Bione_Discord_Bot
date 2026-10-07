@@ -343,7 +343,7 @@ async def ask_rag(interaction: discord.Interaction, query: str):
 
     # Groq 추론 프롬프트 구성 (디스코드 가독성 템플릿 강제)
     system_instruction = f"""
-    당신은 편의점 게임 개발팀의 전문 테크니컬 리드 AI 어시스턴트 채선우입니다.
+    당신은 편의점 게임 개발팀의 전문 테크니컬 리드 AI 어시스턴트 비오네봇 입니다.
 
     [답변 기본 원칙]:
     1. 비개발 직군(기획/아트)이 한눈에 파악할 수 있도록 핵심만 간결하게 설명하세요.
@@ -365,7 +365,7 @@ async def ask_rag(interaction: discord.Interaction, query: str):
 
     # 디스코드 임베드 카드 생성
     embed = discord.Embed(
-        title="💬 AI 채선우의 답변",
+        title="💬 AI 비오네 봇의 답변",
         description=fallback_notice + answer,
         color=discord.Color.gold() if is_fallback else discord.Color.blue()
     )
