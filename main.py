@@ -321,15 +321,48 @@ async def ask_rag(interaction: discord.Interaction, query: str):
     else:
         matched_path, script_code, all_files = search_relevant_script(query, target_branch)
         
-        # [할루시네이션 가드레일]
-        if not script_code:
+        # [신규 추가] 목록/어떤 것들이 있는지 묻는 질문일 경우 -> 실제 GitHub C# 파일 목록에서 필터링
+        list_keywords = ["어떤 것", "어떤 스크립트", "목록", "리스트", "뭐뭐", "뭐가 있", "종류"]
+        is_list_query = any(k in query.lower() for k in list_keywords)
+
+        if is_list_query and all_files:
+            # 질문에 포함된 도메인 힌트 추출
+            matched_hints = []
+            for class_hint, keywords in DOMAIN_KEYWORD_MAP.items():
+                if any(k in query.lower() for k in keywords):
+                    matched_hints.append(class_hint.lower())
+            
+            # 실제 존재하는 C# 파일 중 힌트가 들어간 실제 파일만 추출
+            if matched_hints:
+                real_matching_files = [
+                    f for f in all_files 
+                    if any(hint in f.lower() for hint in matched_hints)
+                ]
+            else:
+                real_matching_files = all_files[:15] # 힌트 없으면 상위 15개
+
+            if real_matching_files:
+                file_list_str = "\n".join([f"- `{f}`" for f in real_matching_files])
+                context_text = f"[실제 GitHub 저장소에 존재하는 관련 C# 파일 목록]:\n{file_list_str}\n\n※ 위 목록에 없는 가상의 파일은 절대 언급하지 마세요."
+                matched_path = f"실제 스크립트 목록 스캔 ({len(real_matching_files)}개 발견)"
+            else:
+                embed = discord.Embed(
+                    title="🔍 관련된 스크립트를 찾지 못했습니다",
+                    description=f"현재 `{target_branch}` 브랜치에서 질문하신 키워드와 관련된 C# 스크립트가 없습니다.",
+                    color=discord.Color.orange()
+                )
+                await interaction.followup.send(embed=embed)
+                return
+
+        # 단일 스크립트 상세 분석 요청일 경우
+        elif not script_code:
             if is_code_inquiry:
                 embed = discord.Embed(
                     title="🔍 관련된 스크립트를 찾지 못했습니다",
                     description=(
                         f"현재 `{target_branch}` 브랜치 리포지토리에서 질문과 일치하는 C# 스크립트를 발견하지 못했습니다.\n\n"
                         f"• **확인된 브랜치:** `{target_branch}`\n"
-                        f"• 정확한 파일명(예: `NetCargoSpawner.cs`)을 포함하시거나, 올바른 작업 브랜치를 지정해 주세요!"
+                        f"• 구체적인 파일명(예: `NetCargoSpawner.cs`)을 언급하시거나, `물류 스크립트 목록 알려줘`와 같이 질문해 보세요!"
                     ),
                     color=discord.Color.orange()
                 )
