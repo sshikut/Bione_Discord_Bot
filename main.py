@@ -22,10 +22,14 @@ GITHUB_REPO_OWNER = os.getenv("GITHUB_REPO_OWNER")
 GITHUB_REPO_NAME = os.getenv("GITHUB_REPO_NAME")
 GITHUB_DEFAULT_BRANCH = os.getenv("GITHUB_DEFAULT_BRANCH", "main")
 
-# 클라이언트 초기화
+# 클라이언트 초기화 (하트비트 타임아웃 방어 옵션 적용)
 groq_client = Groq(api_key=GROQ_API_KEY)
 intents = discord.Intents.default()
-bot = discord.Client(intents=intents)
+bot = discord.Client(
+    intents=intents,
+    max_messages=100,
+    heartbeat_timeout=60.0
+)
 tree = app_commands.CommandTree(bot)
 app = FastAPI()
 
@@ -41,11 +45,14 @@ def get_github_headers():
     return headers
 
 def fetch_all_branches() -> list[dict]:
-    """저장소의 모든 브랜치 목록 반환"""
+    """저장소의 모든 브랜치 목록 반환 (크래시 방어 try-except 적용)"""
     url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/branches"
-    resp = requests.get(url, headers=get_github_headers())
-    if resp.status_code == 200:
-        return resp.json()
+    try:
+        resp = requests.get(url, headers=get_github_headers(), timeout=5)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception as e:
+        print(f"[Warn] fetch_all_branches 실패: {e}")
     return []
 
 def detect_target_branch(query: str, available_branches: list[str]) -> str:
@@ -54,7 +61,6 @@ def detect_target_branch(query: str, available_branches: list[str]) -> str:
     for b in available_branches:
         if b.lower() in query_lower:
             return b
-    # 질문에 명시적 브랜치가 없고 Develop 브랜치가 존재하면 Develop을 우선 기본값으로 고려
     if "develop" in [b.lower() for b in available_branches] and "main" not in query_lower:
         for b in available_branches:
             if b.lower() == "develop":
@@ -67,12 +73,15 @@ def fetch_repo_file_content(path: str, branch: str) -> str:
     headers = {}
     if GITHUB_TOKEN:
         headers["Authorization"] = f"token {GITHUB_TOKEN}"
-    resp = requests.get(url, headers=headers)
-    if resp.status_code == 200:
-        return resp.text
+    try:
+        resp = requests.get(url, headers=headers, timeout=5)
+        if resp.status_code == 200:
+            return resp.text
+    except Exception as e:
+        print(f"[Warn] fetch_repo_file_content 실패: {e}")
     return ""
 
-# 도메인 키워드 -> 스크립트 파일명 힌트 매핑 테이블 (확장)
+# 도메인 키워드 -> 스크립트 파일명 힌트 매핑 테이블
 DOMAIN_KEYWORD_MAP = {
     # 물류 / 스폰 / 박스 / 포장
     "Cargo": ["물류", "카고", "화물"],
@@ -96,21 +105,25 @@ def search_relevant_script(query: str, target_branch: str) -> tuple[str, str, li
     반환값: (매칭된 파일경로, 파일내용, 전체C#파일목록)
     """
     tree_url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/git/trees/{target_branch}?recursive=1"
-    resp = requests.get(tree_url, headers=get_github_headers())
-    if resp.status_code != 200:
-        print(f"[Fetch Error] Trees API 실패 ({resp.status_code}) on branch {target_branch}")
+    try:
+        resp = requests.get(tree_url, headers=get_github_headers(), timeout=5)
+        if resp.status_code != 200:
+            print(f"[Fetch Error] Trees API 실패 ({resp.status_code}) on branch {target_branch}")
+            return "", "", []
+        tree_data = resp.json().get("tree", [])
+        all_cs_files = [item["path"] for item in tree_data if item.get("path", "").endswith(".cs")]
+    except Exception as e:
+        print(f"[Warn] search_relevant_script Trees 파싱 실패: {e}")
         return "", "", []
 
-    all_cs_files = [item["path"] for item in resp.json().get("tree", []) if item["path"].endswith(".cs")]
     query_lower = query.lower()
 
-    # 1순위: 영문 스크립트명 또는 클래스명 직접 언급 탐색 (예: NetCargoSpawner, NetCargoSpawner.cs)
+    # 1순위: 영문 스크립트명 또는 클래스명 직접 언급 탐색
     words = re.findall(r'[a-zA-Z0-9_]+', query)
     for path in all_cs_files:
-        file_name = path.split("/")[-1] # NetCargoSpawner.cs
-        clean_name = file_name.replace(".cs", "") # NetCargoSpawner
+        file_name = path.split("/")[-1]
+        clean_name = file_name.replace(".cs", "")
         
-        # .cs 명시 또는 단어 단위 일치 검사
         if file_name.lower() in query_lower:
             content = fetch_repo_file_content(path, target_branch)
             return path, content, all_cs_files
@@ -128,7 +141,6 @@ def search_relevant_script(query: str, target_branch: str) -> tuple[str, str, li
     if matched_hints:
         for path in all_cs_files:
             file_name = path.split("/")[-1].lower()
-            # 힌트 단어가 파일명에 포함되어 있는지 검사 (예: cargo, spawner)
             if any(hint in file_name for hint in matched_hints):
                 content = fetch_repo_file_content(path, target_branch)
                 return path, content, all_cs_files
@@ -137,20 +149,21 @@ def search_relevant_script(query: str, target_branch: str) -> tuple[str, str, li
 
 def fetch_recent_commits(branch_name: str, count: int = 5) -> str:
     url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/commits?sha={branch_name}&per_page={count}"
-    resp = requests.get(url, headers=get_github_headers())
-    if resp.status_code != 200:
-        return "커밋 내역을 불러오지 못했습니다."
-
-    commits = resp.json()
-    result = []
-    for c in commits:
-        sha = c.get("sha", "")[:7]
-        author = c.get("commit", {}).get("author", {}).get("name", "Unknown")
-        date = c.get("commit", {}).get("author", {}).get("date", "")[:10]
-        message = c.get("commit", {}).get("message", "").strip().split("\n")[0]
-        result.append(f"- [{sha}] {message} (작업자: {author}, 일자: {date})")
-
-    return "\n".join(result)
+    try:
+        resp = requests.get(url, headers=get_github_headers(), timeout=5)
+        if resp.status_code == 200:
+            commits = resp.json()
+            result = []
+            for c in commits:
+                sha = c.get("sha", "")[:7]
+                author = c.get("commit", {}).get("author", {}).get("name", "Unknown")
+                date = c.get("commit", {}).get("author", {}).get("date", "")[:10]
+                message = c.get("commit", {}).get("message", "").strip().split("\n")[0]
+                result.append(f"- [{sha}] {message} (작업자: {author}, 일자: {date})")
+            return "\n".join(result)
+    except Exception as e:
+        print(f"[Warn] fetch_recent_commits 파싱 실패: {e}")
+    return "커밋 내역을 불러오지 못했습니다."
 
 def fetch_branch_activity_summary(target_branch: str = None) -> str:
     branches = fetch_all_branches()
@@ -184,7 +197,7 @@ def query_groq(prompt: str, system_prompt: str) -> tuple[str, str, bool]:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.2, # 환각 방지를 위해 0.2로 낮춤
+                temperature=0.2,
                 max_completion_tokens=1024,
                 top_p=1,
                 stream=False
@@ -238,6 +251,9 @@ async def question_guide(interaction: discord.Interaction):
 @tree.command(name="질문", description="GitHub 최신 코드, 브랜치별 작업 내역 기반으로 AI에게 질문합니다.")
 @app_commands.describe(query="궁금한 시스템 스펙, 특정 브랜치 작업 내역, 또는 일상 질문을 입력하세요")
 async def ask_rag(interaction: discord.Interaction, query: str):
+    # [3초 타임아웃 방어] 최우선 순위로 defer 호출
+    await interaction.response.defer()
+
     clean_query = query.strip()
     if len(clean_query) < 4:
         guide_embed = discord.Embed(
@@ -245,10 +261,8 @@ async def ask_rag(interaction: discord.Interaction, query: str):
             description="더 정확한 답변을 위해 조금 더 구체적으로 질문해 주세요.\n`/질문가이드` 명령어를 통해 예시를 확인하실 수 있습니다.",
             color=discord.Color.orange()
         )
-        await interaction.response.send_message(embed=guide_embed, ephemeral=True)
+        await interaction.followup.send(embed=guide_embed, ephemeral=True)
         return
-
-    await interaction.response.defer()
 
     # 1. 활성 브랜치 목록 동적 파악 및 타깃 브랜치 결정
     all_branch_dicts = fetch_all_branches()
@@ -261,7 +275,6 @@ async def ask_rag(interaction: discord.Interaction, query: str):
     commit_keywords = ["커밋", "최근", "변경점", "업데이트"]
     is_commit_query = any(k in query for k in commit_keywords)
     
-    # 코드/스크립트/구현 질문 여부 판별
     code_keywords = ["스크립트", ".cs", "코드", "구현", "어디", "함수", "로직", "스펙", "어떻게"]
     is_code_inquiry = any(k in query.lower() for k in code_keywords) or any(k in query for k in ["포장", "물류", "스폰", "손님", "진열", "계산"])
 
@@ -275,7 +288,7 @@ async def ask_rag(interaction: discord.Interaction, query: str):
         context_text = f"[GitHub 활성 브랜치 작업 현황]:\n{branch_context}"
         matched_path = f"동적 브랜치 스캔 ({target_b if target_b else '전체 작업 브랜치'})"
 
-    # 분기 B: 단순 최근 커밋 내역 요청
+    # 분기 B: 최근 커밋 내역 요청
     elif is_commit_query and not is_code_inquiry:
         recent_commits = fetch_recent_commits(target_branch, 5)
         context_text = f"[최근 저장소 커밋 내역 ({target_branch})]:\n{recent_commits}"
@@ -285,9 +298,8 @@ async def ask_rag(interaction: discord.Interaction, query: str):
     else:
         matched_path, script_code, all_files = search_relevant_script(query, target_branch)
         
-        # [할루시네이션 원천 차단 가드레일]
+        # [할루시네이션 가드레일]
         if not script_code:
-            # 코드나 구현 위치를 묻는 질문인데 리포지토리에 실제 파일이 없는 경우 Groq를 부르지 않고 정중히 거절
             if is_code_inquiry:
                 embed = discord.Embed(
                     title="🔍 관련된 스크립트를 찾지 못했습니다",
@@ -302,12 +314,11 @@ async def ask_rag(interaction: discord.Interaction, query: str):
                 await interaction.followup.send(embed=embed)
                 return
             else:
-                # 코드 질문이 아닌 일반 대화 질문인 경우
                 context_text = "일반 질문 모드 (코드 참조 없음)"
         else:
             context_text = f"[대상 브랜치]: {target_branch}\n[참조 파일 경로]: {matched_path}\n\n[C# 소스 코드]:\n{script_code[:4500]}"
 
-    # Groq 추론 프롬프트 구성
+    # Groq 추론 프롬프트 구성 (디스코드 가독성 템플릿 강제)
     system_instruction = f"""
     당신은 편의점 게임 개발팀의 전문 테크니컬 리드 AI 어시스턴트 채선우입니다.
 
@@ -331,13 +342,13 @@ async def ask_rag(interaction: discord.Interaction, query: str):
 
     # 디스코드 임베드 카드 생성
     embed = discord.Embed(
-        title="💬 AI의 답변",
+        title="💬 AI 채선우의 답변",
         description=fallback_notice + answer,
         color=discord.Color.gold() if is_fallback else discord.Color.blue()
     )
     embed.add_field(name="질문", value=f"`{query}`", inline=False)
     
-    # 🌿 브랜치 및 참조 파일 명시 필드 추가
+    # 참조 브랜치 및 소스 경로 명시
     if matched_path:
         embed.add_field(
             name="🌿 참조 브랜치 및 소스",
@@ -345,7 +356,6 @@ async def ask_rag(interaction: discord.Interaction, query: str):
             inline=False
         )
 
-    # 푸터 구성: 모델명 | 브랜치 정보
     footer_text = f"엔진: {used_model} | 브랜치: {target_branch}"
     embed.set_footer(text=footer_text)
 
@@ -357,8 +367,9 @@ async def on_ready():
     print(f"디스코드 봇 로그인 완료: {bot.user.name}")
     print(f"GitHub 동기화 리포지토리: {GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME} (기본: {GITHUB_DEFAULT_BRANCH})")
 
-# --- FastAPI Webhook 엔드포인트 ---
-@app.get("/")
+# --- FastAPI Webhook & Health Check 엔드포인트 ---
+# [핵심] UptimeRobot의 HEAD 메소드와 브라우저/Render의 GET 메소드를 모두 수용하여 405 Method Not Allowed 차단
+@app.api_route("/", methods=["GET", "HEAD"])
 def health_check():
     return {"status": "ok", "service": "GitHub Live Fetch & Webhook Discord Bot"}
 
@@ -460,13 +471,22 @@ async def github_webhook(request: Request):
 
     return {"status": "ignored", "event": event_type}
 
+# [핵심] Render 포트 바인딩 즉각 통과 및 디스코드 자동 재연결(reconnect=True)
 async def main():
-    config = uvicorn.Config(app=app, host="0.0.0.0", port=PORT, log_level="info")
-    server = uvicorn.Server(config)
-    await asyncio.gather(
-        server.serve(),
-        bot.start(DISCORD_BOT_TOKEN)
+    config = uvicorn.Config(
+        app=app, 
+        host="0.0.0.0", 
+        port=PORT, 
+        log_level="warning",
+        access_log=False
     )
+    server = uvicorn.Server(config)
+    
+    # 1. FastAPI 웹 서버를 백그라운드 태스크로 즉시 실행하여 Render 배포 헬스체크 통과
+    asyncio.create_task(server.serve())
+    
+    # 2. 디스코드 봇 구동 (네트워크 단절 시 자동 재접속 보장)
+    await bot.start(DISCORD_BOT_TOKEN, reconnect=True)
 
 if __name__ == "__main__":
     asyncio.run(main())
