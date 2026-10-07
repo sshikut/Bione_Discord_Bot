@@ -41,6 +41,17 @@ def get_github_headers():
     return headers
 
 def fetch_all_branches() -> list[dict]:
+<<<<<<< HEAD
+    url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/branches"
+    try:
+        resp = requests.get(url, headers=get_github_headers(), timeout=5)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception as e:
+        print(f"[Warn] fetch_all_branches 파싱 실패: {e}")
+    return []
+
+=======
     """저장소의 모든 브랜치 목록 반환"""
     url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/branches"
     resp = requests.get(url, headers=get_github_headers())
@@ -99,6 +110,112 @@ def search_relevant_script(query: str, target_branch: str) -> tuple[str, str, li
     resp = requests.get(tree_url, headers=get_github_headers())
     if resp.status_code != 200:
         print(f"[Fetch Error] Trees API 실패 ({resp.status_code}) on branch {target_branch}")
+        return "", "", []
+
+    all_cs_files = [item["path"] for item in resp.json().get("tree", []) if item["path"].endswith(".cs")]
+    query_lower = query.lower()
+
+    # 1순위: 영문 스크립트명 또는 클래스명 직접 언급 탐색 (예: NetCargoSpawner, NetCargoSpawner.cs)
+    words = re.findall(r'[a-zA-Z0-9_]+', query)
+    for path in all_cs_files:
+        file_name = path.split("/")[-1] # NetCargoSpawner.cs
+        clean_name = file_name.replace(".cs", "") # NetCargoSpawner
+        
+        # .cs 명시 또는 단어 단위 일치 검사
+        if file_name.lower() in query_lower:
+            content = fetch_repo_file_content(path, target_branch)
+            return path, content, all_cs_files
+        for w in words:
+            if len(w) >= 4 and w.lower() == clean_name.lower():
+                content = fetch_repo_file_content(path, target_branch)
+                return path, content, all_cs_files
+
+    # 2순위: 도메인 자연어 키워드 매핑 매칭
+    matched_hints = []
+    for class_hint, keywords in DOMAIN_KEYWORD_MAP.items():
+        if any(k in query_lower for k in keywords):
+            matched_hints.append(class_hint.lower())
+
+    if matched_hints:
+        for path in all_cs_files:
+            file_name = path.split("/")[-1].lower()
+            # 힌트 단어가 파일명에 포함되어 있는지 검사 (예: cargo, spawner)
+            if any(hint in file_name for hint in matched_hints):
+                content = fetch_repo_file_content(path, target_branch)
+                return path, content, all_cs_files
+
+    return "", "", all_cs_files
+
+>>>>>>> parent of 5722d7f (fix: all)
+def fetch_recent_commits(branch_name: str, count: int = 5) -> str:
+    url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/commits?sha={branch_name}&per_page={count}"
+    resp = requests.get(url, headers=get_github_headers())
+    if resp.status_code != 200:
+        return "커밋 내역을 불러오지 못했습니다."
+
+    commits = resp.json()
+    result = []
+    for c in commits:
+        sha = c.get("sha", "")[:7]
+        author = c.get("commit", {}).get("author", {}).get("name", "Unknown")
+        date = c.get("commit", {}).get("author", {}).get("date", "")[:10]
+        message = c.get("commit", {}).get("message", "").strip().split("\n")[0]
+        result.append(f"- [{sha}] {message} (작업자: {author}, 일자: {date})")
+
+    return "\n".join(result)
+
+def detect_target_branch(query: str, available_branches: list[str]) -> str:
+    """사용자 질문에서 브랜치명이 언급되었는지 감지 (없으면 GITHUB_DEFAULT_BRANCH)"""
+    query_lower = query.lower()
+    for b in available_branches:
+        if b.lower() in query_lower:
+            return b
+    # 질문에 명시적 브랜치가 없고 Develop 브랜치가 존재하면 Develop을 우선 기본값으로 고려
+    if "develop" in [b.lower() for b in available_branches] and "main" not in query_lower:
+        for b in available_branches:
+            if b.lower() == "develop":
+                return b
+    return GITHUB_DEFAULT_BRANCH
+
+def fetch_repo_file_content(path: str, branch: str) -> str:
+    """특정 브랜치의 파일 원본 코드 가져오기"""
+    url = f"https://raw.githubusercontent.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/{branch}/{path}"
+    headers = {}
+    if GITHUB_TOKEN:
+        headers["Authorization"] = f"token {GITHUB_TOKEN}"
+    resp = requests.get(url, headers=headers)
+    if resp.status_code == 200:
+        return resp.text
+    return ""
+
+# 도메인 키워드 -> 스크립트 파일명 힌트 매핑 테이블 (확장)
+DOMAIN_KEYWORD_MAP = {
+    # 물류 / 스폰 / 박스 / 포장
+    "Cargo": ["물류", "카고", "화물"],
+    "Spawner": ["스폰", "소환", "생성기", "spawner"],
+    "Pack": ["포장", "패키징", "상자포장", "박싱", "wrap"],
+    # 손님 / AI
+    "Customer": ["손님", "고객", "npc", "구매", "쇼핑", "바구니", "장바구니"],
+    # 진열 / 가구
+    "Display": ["진열", "진열대", "선반", "전시", "배치", "buildable"],
+    # 아이템 / 신선도 / 보관
+    "Item": ["아이템", "신선도", "냉장고", "유통기한", "보관", "부패", "음식"],
+    # 결제 / 포스기
+    "POS": ["포스", "계산", "결제", "정산", "매출", "돈", "가격", "체크아웃", "checkout"],
+    # 플레이어
+    "Player": ["플레이어", "조작", "이동", "상호작용", "속도"]
+}
+
+def search_relevant_script(query: str, target_branch: str) -> tuple[str, str, list[str]]:
+    tree_url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/git/trees/{target_branch}?recursive=1"
+    try:
+        resp = requests.get(tree_url, headers=get_github_headers(), timeout=5)
+        if resp.status_code != 200:
+            return "", "", []
+        tree_data = resp.json().get("tree", [])
+        all_cs_files = [item["path"] for item in tree_data if item.get("path", "").endswith(".cs")]
+    except Exception as e:
+        print(f"[Warn] search_relevant_script Trees 파싱 실패: {e}")
         return "", "", []
 
     all_cs_files = [item["path"] for item in resp.json().get("tree", []) if item["path"].endswith(".cs")]
@@ -238,9 +355,12 @@ async def question_guide(interaction: discord.Interaction):
 @tree.command(name="질문", description="GitHub 최신 코드, 브랜치별 작업 내역 기반으로 AI에게 질문합니다.")
 @app_commands.describe(query="궁금한 시스템 스펙, 특정 브랜치 작업 내역, 또는 일상 질문을 입력하세요")
 async def ask_rag(interaction: discord.Interaction, query: str):
+<<<<<<< HEAD
     # [최우선] 무조건 1순위로 defer 호출 (3초 타임아웃 방어)
     await interaction.response.defer()
 
+=======
+>>>>>>> parent of 5722d7f (fix: all)
     clean_query = query.strip()
     if len(clean_query) < 4:
         guide_embed = discord.Embed(
@@ -248,7 +368,7 @@ async def ask_rag(interaction: discord.Interaction, query: str):
             description="더 정확한 답변을 위해 조금 더 구체적으로 질문해 주세요.\n`/질문가이드` 명령어를 통해 예시를 확인하실 수 있습니다.",
             color=discord.Color.orange()
         )
-        await interaction.followup.send(embed=guide_embed, ephemeral=True)
+        await interaction.response.send_message(embed=guide_embed, ephemeral=True)
         return
 
     await interaction.response.defer()
@@ -361,7 +481,11 @@ async def on_ready():
     print(f"GitHub 동기화 리포지토리: {GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME} (기본: {GITHUB_DEFAULT_BRANCH})")
 
 # --- FastAPI Webhook 엔드포인트 ---
+<<<<<<< HEAD
 @app.api_route("/", methods=["GET", "HEAD"])
+=======
+@app.get("/")
+>>>>>>> parent of 5722d7f (fix: all)
 def health_check():
     return {"status": "ok", "service": "GitHub Live Fetch & Webhook Discord Bot"}
 
