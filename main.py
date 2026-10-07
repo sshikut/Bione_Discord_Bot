@@ -238,6 +238,9 @@ async def question_guide(interaction: discord.Interaction):
 @tree.command(name="질문", description="GitHub 최신 코드, 브랜치별 작업 내역 기반으로 AI에게 질문합니다.")
 @app_commands.describe(query="궁금한 시스템 스펙, 특정 브랜치 작업 내역, 또는 일상 질문을 입력하세요")
 async def ask_rag(interaction: discord.Interaction, query: str):
+    # [최우선] 무조건 1순위로 defer 호출 (3초 타임아웃 방어)
+    await interaction.response.defer()
+
     clean_query = query.strip()
     if len(clean_query) < 4:
         guide_embed = discord.Embed(
@@ -245,7 +248,7 @@ async def ask_rag(interaction: discord.Interaction, query: str):
             description="더 정확한 답변을 위해 조금 더 구체적으로 질문해 주세요.\n`/질문가이드` 명령어를 통해 예시를 확인하실 수 있습니다.",
             color=discord.Color.orange()
         )
-        await interaction.response.send_message(embed=guide_embed, ephemeral=True)
+        await interaction.followup.send(embed=guide_embed, ephemeral=True)
         return
 
     await interaction.response.defer()
@@ -358,7 +361,7 @@ async def on_ready():
     print(f"GitHub 동기화 리포지토리: {GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME} (기본: {GITHUB_DEFAULT_BRANCH})")
 
 # --- FastAPI Webhook 엔드포인트 ---
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def health_check():
     return {"status": "ok", "service": "GitHub Live Fetch & Webhook Discord Bot"}
 
