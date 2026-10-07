@@ -33,24 +33,12 @@ bot = discord.Client(
 )
 tree = app_commands.CommandTree(bot)
 
-# --- Discord 봇 백그라운드 구동 래퍼 (로그 확인 및 크래시 추적) ---
-async def run_discord_bot():
-    try:
-        print("[Bot Init] 디스코드 봇 로그인을 시도합니다...")
-        if not DISCORD_BOT_TOKEN:
-            print("[Bot Error] DISCORD_BOT_TOKEN 환경 변수가 설정되지 않았습니다!")
-            return
-        await bot.start(DISCORD_BOT_TOKEN, reconnect=True)
-    except Exception as e:
-        print(f"[Bot Critical Error] 디스코드 봇 구동 중 예외 발생: {e}")
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # FastAPI 서버가 포트를 열고 기동될 때 디스코드 봇을 백그라운드 태스크로 시작
-    bot_task = asyncio.create_task(run_discord_bot())
+    # 1. FastAPI 서버가 포트를 열고 기동될 때 디스코드 봇을 백그라운드 태스크로 시작
+    bot_task = asyncio.create_task(bot.start(DISCORD_BOT_TOKEN, reconnect=True))
     yield
     # 서버 종료 시 봇 정리
-    print("[Bot Teardown] 서버 종료 요청으로 봇을 안전하게 닫습니다.")
     await bot.close()
     bot_task.cancel()
 
@@ -494,7 +482,7 @@ async def github_webhook(request: Request):
 
     return {"status": "ignored", "event": event_type}
 
-# Uvicorn 단독 구동: lifespan 훅을 통해 포트를 먼저 열고 백그라운드에서 Discord 봇을 시작합니다.
+# [핵심] Render 포트 바인딩 즉각 통과 및 디스코드 자동 재연결(reconnect=True)
 async def main():
     config = uvicorn.Config(
         app=app, 
