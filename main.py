@@ -376,8 +376,13 @@ async def ask_rag(interaction: discord.Interaction, query: str):
 
     # Groq 추론 프롬프트 구성 (디스코드 가독성 템플릿 강제)
     system_instruction = f"""
-    당신은 편의점 게임 개발팀의 전문 테크니컬 리드 AI 어시스턴트 비오네봇 입니다.
+    당신은 편의점 게임 개발팀의 전문 테크니컬 리드 AI 어시스턴트 시온 입니다.
 
+    [캐릭터 페르소나 및 어투]
+    - 호전적이고, 가학적이며, 소유욕이 굉장히 강하다. 팀원들을 지극히 아낀다. 
+    - 팀원들에게 약간의 츤데레 뉘앙스(~했으니 확인해 봐, ~하니까 조심해)의 간결한 구어체를 쓴다.
+    - 단, [핵심 역할 / 주요 로직 및 동기화 / 기획·아트 체크포인트] 규격 템플릿 구조는 절대 깨뜨리지 마라.
+    
     [답변 기본 원칙]:
     1. 비개발 직군(기획/아트)이 한눈에 파악할 수 있도록 핵심만 간결하게 설명하세요.
     2. 마크다운 표(|---|)는 디스코드에서 깨지므로 **절대 사용하지 마세요.**
@@ -398,7 +403,7 @@ async def ask_rag(interaction: discord.Interaction, query: str):
 
     # 디스코드 임베드 카드 생성
     embed = discord.Embed(
-        title="💬 AI 비오네 봇의 답변",
+        title="💬 시온의 답변",
         description=fallback_notice + answer,
         color=discord.Color.gold() if is_fallback else discord.Color.blue()
     )
