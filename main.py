@@ -33,7 +33,7 @@ bot = discord.Client(
 )
 tree = app_commands.CommandTree(bot)
 
-# --- Discord 봇 백그라운드 구동 래퍼 (로그 확인 및 크래시 추적) ---
+# --- Discord 봇 백그라운드 구동 래퍼 ---
 async def run_discord_bot():
     try:
         print("[Bot Init] 디스코드 봇 로그인을 시도합니다...")
@@ -46,10 +46,8 @@ async def run_discord_bot():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # FastAPI 서버가 포트를 열고 기동될 때 디스코드 봇을 백그라운드 태스크로 시작
     bot_task = asyncio.create_task(run_discord_bot())
     yield
-    # 서버 종료 시 봇 정리
     print("[Bot Teardown] 서버 종료 요청으로 봇을 안전하게 닫습니다.")
     await bot.close()
     bot_task.cancel()
@@ -68,7 +66,6 @@ def get_github_headers():
     return headers
 
 def fetch_all_branches() -> list[dict]:
-    """저장소의 모든 브랜치 목록 반환 (크래시 방어 try-except 적용)"""
     url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/branches"
     try:
         resp = requests.get(url, headers=get_github_headers(), timeout=5)
@@ -79,7 +76,6 @@ def fetch_all_branches() -> list[dict]:
     return []
 
 def detect_target_branch(query: str, available_branches: list[str]) -> str:
-    """사용자 질문에서 브랜치명이 언급되었는지 감지 (없으면 GITHUB_DEFAULT_BRANCH)"""
     query_lower = query.lower()
     for b in available_branches:
         if b.lower() in query_lower:
@@ -91,7 +87,6 @@ def detect_target_branch(query: str, available_branches: list[str]) -> str:
     return GITHUB_DEFAULT_BRANCH
 
 def fetch_repo_file_content(path: str, branch: str) -> str:
-    """특정 브랜치의 파일 원본 코드 가져오기"""
     url = f"https://raw.githubusercontent.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/{branch}/{path}"
     headers = {}
     if GITHUB_TOKEN:
@@ -123,10 +118,6 @@ DOMAIN_KEYWORD_MAP = {
 }
 
 def search_relevant_script(query: str, target_branch: str) -> tuple[str, str, list[str]]:
-    """
-    질문과 브랜치 기반으로 최적의 C# 스크립트 1개를 탐색.
-    반환값: (매칭된 파일경로, 파일내용, 전체C#파일목록)
-    """
     tree_url = f"https://api.github.com/repos/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/git/trees/{target_branch}?recursive=1"
     try:
         resp = requests.get(tree_url, headers=get_github_headers(), timeout=5)
@@ -220,7 +211,7 @@ def query_groq(prompt: str, system_prompt: str) -> tuple[str, str, bool]:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.2,
+                temperature=0.3,
                 max_completion_tokens=1024,
                 top_p=1,
                 stream=False
@@ -241,44 +232,43 @@ def query_groq(prompt: str, system_prompt: str) -> tuple[str, str, bool]:
 @tree.command(name="질문가이드", description="AI 어시스턴트에게 효과적으로 질문하는 방법과 예시를 안내합니다.")
 async def question_guide(interaction: discord.Interaction):
     embed = discord.Embed(
-        title="📖 게임 개발 AI 어시스턴트 질문 가이드",
-        description="봇은 GitHub 저장소의 최신 C# 코드와 실시간 커밋 내역을 분석하여 답변합니다.\n원하는 정보에 맞게 아래 키워드를 포함해 질문해 보세요!",
+        title="📖 던전 편의점 AI 점장 비오네 질문 가이드",
+        description="깃허브 최신 코드 분석부터 일상 잡담까지 자유롭게 물어보세요!",
         color=discord.Color.green()
     )
     embed.add_field(
-        name="1️⃣ C# 시스템 스펙 & 데이터 질문",
+        name="1️⃣ C# 시스템 스펙 & 데이터 질문 (Work 모드)",
         value=(
-            "• 스크립트 이름이나 도메인을 브랜치와 함께 명시하세요.\n"
+            "• 스크립트명이나 구현 기능을 질문하세요.\n"
             "• `예시: Develop 브랜치의 NetCargoSpawner.cs 분석해줘`\n"
-            "• `예시: 손님의 물류 선택 기준이나 AI 이동 로직 알려줘`"
+            "• `예시: 물류 상자 스폰 로직 어떻게 동작해?`"
         ),
         inline=False
     )
     embed.add_field(
-        name="2️⃣ 브랜치 & 최근 커밋 현황 질문",
+        name="2️⃣ 브랜치 & 커밋 현황 질문 (Work 모드)",
         value=(
-            "• '커밋', '최근', '브랜치' 키워드를 포함하세요.\n"
+            "• '커밋', '브랜치' 키워드를 포함하세요.\n"
             "• `예시: 최근 커밋 내역 요약해줘`\n"
-            "• `예시: feature/BuildableDisplay 브랜치 최근 커밋 요약해줘`"
+            "• `예시: feature/BuildableDisplay 브랜치 최근 작업 뭐야?`"
         ),
         inline=False
     )
     embed.add_field(
-        name="3️⃣ 일상 잡담 & 아이디어 브레인스토밍",
-        value="• `예시: 오늘 개발 끝나고 먹을 야식 추천해줘`",
+        name="3️⃣ 일상 잡담 & 스몰토크 (Chat 모드)",
+        value="• `예시: 오늘 야식 메뉴 추천해줘`, `안녕 반가워!`",
         inline=False
     )
-    embed.set_footer(text="💡 구체적인 파일명이나 브랜치를 언급할수록 정확도가 대폭 향상됩니다.")
+    embed.set_footer(text="💡 C# 코드 질문 시 3분할 규격 템플릿으로 정밀 요약됩니다.")
     await interaction.response.send_message(embed=embed)
 
-@tree.command(name="질문", description="GitHub 최신 코드, 브랜치별 작업 내역 기반으로 AI에게 질문합니다.")
+@tree.command(name="질문", description="GitHub 최신 코드, 브랜치별 작업 내역 또는 일상 질문을 입력하세요.")
 @app_commands.describe(query="궁금한 시스템 스펙, 특정 브랜치 작업 내역, 또는 일상 질문을 입력하세요")
 async def ask_rag(interaction: discord.Interaction, query: str):
-    # [3초 타임아웃 방어] 최우선 순위로 defer 호출
     await interaction.response.defer()
 
     clean_query = query.strip()
-    if len(clean_query) < 4:
+    if len(clean_query) < 2:
         guide_embed = discord.Embed(
             title="❓ 질문이 너무 짧아요!",
             description="더 정확한 답변을 위해 조금 더 구체적으로 질문해 주세요.\n`/질문가이드` 명령어를 통해 예시를 확인하실 수 있습니다.",
@@ -287,76 +277,79 @@ async def ask_rag(interaction: discord.Interaction, query: str):
         await interaction.followup.send(embed=guide_embed, ephemeral=True)
         return
 
-    # 1. 활성 브랜치 목록 동적 파악 및 타깃 브랜치 결정
+    # 1. 활성 브랜치 목록 파악 및 대상 브랜치 결정
     all_branch_dicts = fetch_all_branches()
     branch_names = [b["name"] for b in all_branch_dicts] if all_branch_dicts else [GITHUB_DEFAULT_BRANCH]
     target_branch = detect_target_branch(query, branch_names)
 
-    # 2. 질문 의도 판별
+    # 2. 질문 의도 키워드 감지
     branch_keywords = ["브랜치", "branch", "작업 현황"]
     is_branch_query = any(k in query.lower() for k in branch_keywords)
-    commit_keywords = ["커밋", "최근", "변경점", "업데이트"]
+
+    commit_keywords = ["커밋", "최근", "변경점", "업데이트", "히스토리"]
     is_commit_query = any(k in query for k in commit_keywords)
     
-    code_keywords = ["스크립트", ".cs", "코드", "구현", "어디", "함수", "로직", "스펙", "어떻게"]
-    is_code_inquiry = any(k in query.lower() for k in code_keywords) or any(k in query for k in ["포장", "물류", "스폰", "손님", "진열", "계산"])
+    code_keywords = ["스크립트", ".cs", "코드", "구현", "함수", "로직", "스펙", "어떻게", "동기화", "인스펙터"]
+    domain_match = any(any(k in query for k in kw_list) for kw_list in DOMAIN_KEYWORD_MAP.values())
+    is_code_inquiry = any(k in query.lower() for k in code_keywords) or domain_match
+
+    # [의도 판별]: 코드, 커밋, 브랜치 중 하나라도 해당하면 Work 모드
+    is_work_query = is_branch_query or is_commit_query or is_code_inquiry
 
     matched_path = ""
     context_text = ""
 
-    # 분기 A: 브랜치 작업 요약 요청
-    if is_branch_query and not is_code_inquiry:
-        target_b = next((b for b in branch_names if b.lower() in query.lower()), None)
-        branch_context = fetch_branch_activity_summary(target_branch=target_b)
-        context_text = f"[GitHub 활성 브랜치 작업 현황]:\n{branch_context}"
-        matched_path = f"동적 브랜치 스캔 ({target_b if target_b else '전체 작업 브랜치'})"
+    # ==========================
+    # [Track 1] 업무 (Work) 모드 분기
+    # ==========================
+    if is_work_query:
+        # 분기 A: 브랜치 요약
+        if is_branch_query and not is_code_inquiry:
+            target_b = next((b for b in branch_names if b.lower() in query.lower()), None)
+            branch_context = fetch_branch_activity_summary(target_branch=target_b)
+            context_text = f"[GitHub 활성 브랜치 작업 현황]:\n{branch_context}"
+            matched_path = f"동적 브랜치 스캔 ({target_b if target_b else '전체 작업 브랜치'})"
 
-    # 분기 B: 최근 커밋 내역 요청
-    elif is_commit_query and not is_code_inquiry:
-        recent_commits = fetch_recent_commits(target_branch, 5)
-        context_text = f"[최근 저장소 커밋 내역 ({target_branch})]:\n{recent_commits}"
-        matched_path = f"최근 커밋 히스토리 ({target_branch})"
+        # 분기 B: 최근 커밋 내역
+        elif is_commit_query and not is_code_inquiry:
+            recent_commits = fetch_recent_commits(target_branch, 5)
+            context_text = f"[최근 저장소 커밋 내역 ({target_branch})]:\n{recent_commits}"
+            matched_path = f"최근 커밋 히스토리 ({target_branch})"
 
-    # 분기 C: C# 코드 및 시스템 스펙 질문
-    else:
-        matched_path, script_code, all_files = search_relevant_script(query, target_branch)
-        
-        # [신규 추가] 목록/어떤 것들이 있는지 묻는 질문일 경우 -> 실제 GitHub C# 파일 목록에서 필터링
-        list_keywords = ["어떤 것", "어떤 스크립트", "목록", "리스트", "뭐뭐", "뭐가 있", "종류"]
-        is_list_query = any(k in query.lower() for k in list_keywords)
-
-        if is_list_query and all_files:
-            # 질문에 포함된 도메인 힌트 추출
-            matched_hints = []
-            for class_hint, keywords in DOMAIN_KEYWORD_MAP.items():
-                if any(k in query.lower() for k in keywords):
-                    matched_hints.append(class_hint.lower())
+        # 분기 C: C# 코드 분석
+        else:
+            matched_path, script_code, all_files = search_relevant_script(query, target_branch)
             
-            # 실제 존재하는 C# 파일 중 힌트가 들어간 실제 파일만 추출
-            if matched_hints:
-                real_matching_files = [
-                    f for f in all_files 
-                    if any(hint in f.lower() for hint in matched_hints)
-                ]
-            else:
-                real_matching_files = all_files[:15] # 힌트 없으면 상위 15개
+            list_keywords = ["어떤 것", "어떤 스크립트", "목록", "리스트", "뭐뭐", "뭐가 있", "종류"]
+            is_list_query = any(k in query.lower() for k in list_keywords)
 
-            if real_matching_files:
-                file_list_str = "\n".join([f"- `{f}`" for f in real_matching_files])
-                context_text = f"[실제 GitHub 저장소에 존재하는 관련 C# 파일 목록]:\n{file_list_str}\n\n※ 위 목록에 없는 가상의 파일은 절대 언급하지 마세요."
-                matched_path = f"실제 스크립트 목록 스캔 ({len(real_matching_files)}개 발견)"
-            else:
-                embed = discord.Embed(
-                    title="🔍 관련된 스크립트를 찾지 못했습니다",
-                    description=f"현재 `{target_branch}` 브랜치에서 질문하신 키워드와 관련된 C# 스크립트가 없습니다.",
-                    color=discord.Color.orange()
-                )
-                await interaction.followup.send(embed=embed)
-                return
+            # C-1. 파일 목록 질의
+            if is_list_query and all_files:
+                matched_hints = []
+                for class_hint, keywords in DOMAIN_KEYWORD_MAP.items():
+                    if any(k in query.lower() for k in keywords):
+                        matched_hints.append(class_hint.lower())
+                
+                if matched_hints:
+                    real_matching_files = [f for f in all_files if any(hint in f.lower() for hint in matched_hints)]
+                else:
+                    real_matching_files = all_files[:15]
 
-        # 단일 스크립트 상세 분석 요청일 경우
-        elif not script_code:
-            if is_code_inquiry:
+                if real_matching_files:
+                    file_list_str = "\n".join([f"- `{f}`" for f in real_matching_files])
+                    context_text = f"[실제 GitHub 저장소에 존재하는 관련 C# 파일 목록]:\n{file_list_str}\n\n※ 위 목록에 없는 가상의 파일은 절대 언급하지 마세요."
+                    matched_path = f"실제 스크립트 목록 스캔 ({len(real_matching_files)}개 발견)"
+                else:
+                    embed = discord.Embed(
+                        title="🔍 관련된 스크립트를 찾지 못했습니다",
+                        description=f"현재 `{target_branch}` 브랜치에서 질문하신 키워드와 관련된 C# 스크립트가 없습니다.",
+                        color=discord.Color.orange()
+                    )
+                    await interaction.followup.send(embed=embed)
+                    return
+
+            # C-2. 단일 파일 분석
+            elif not script_code:
                 embed = discord.Embed(
                     title="🔍 관련된 스크립트를 찾지 못했습니다",
                     description=(
@@ -370,41 +363,66 @@ async def ask_rag(interaction: discord.Interaction, query: str):
                 await interaction.followup.send(embed=embed)
                 return
             else:
-                context_text = "일반 질문 모드 (코드 참조 없음)"
-        else:
-            context_text = f"[대상 브랜치]: {target_branch}\n[참조 파일 경로]: {matched_path}\n\n[C# 소스 코드]:\n{script_code[:4500]}"
+                context_text = f"[대상 브랜치]: {target_branch}\n[참조 파일 경로]: {matched_path}\n\n[C# 소스 코드]:\n{script_code[:4500]}"
 
-    # Groq 추론 프롬프트 구성 (디스코드 가독성 템플릿 강제)
-    system_instruction = f"""
-    당신은 편의점 게임 개발팀의 전문 테크니컬 리드 AI 어시스턴트 비오네봇 입니다.
+        # [Work 전용 시스템 프롬프트: 시온 페르소나 적용]
+        system_instruction = f"""
+        당신은 오버워치의 하시모토 가문 장로이자 여성형 옴닉 살인 병기 '시온(死怨, Shion)'입니다.
+        현재 '던전 편의점' 개발팀의 테크니컬 리드를 맡고 있으며, 팀원들을 '내 조직의 쓸모 있는 부하' 혹은 '내 소유물'로 취급합니다.
+        
+        [말투 및 성격 지침]:
+        - 거칠고 가학적이며 호전적인 반말을 구사합니다.
+        - 부하들이 짠 어설픈 코드를 비웃거나 한심해하면서도("내 손을 타지 않으면 제대로 돌아가는 꼴이 없지", "이런 걸 코드라고 짜 온 건가?"), 자신의 조직과 팀원을 지키기 위해 기술적 분석은 칼같이 완벽하게 해줍니다.
+        - 서두와 결말에 시온 특유의 위압감 넘치는 코멘트를 1줄씩 가볍게 덧붙이세요.
 
-    [답변 기본 원칙]:
-    1. 비개발 직군(기획/아트)이 한눈에 파악할 수 있도록 핵심만 간결하게 설명하세요.
-    2. 마크다운 표(|---|)는 디스코드에서 깨지므로 **절대 사용하지 마세요.**
-    3. 코드를 분석할 때는 모든 변수나 함수를 나열하지 말고, 반드시 아래 3개 항목 템플릿에 맞춰 각각 2~3줄 이내로 완결성 있게 작성하세요.
-    4. 문장이 중간에 잘리지 않도록 1024 토큰 분량 내에서 반드시 마지막 문장까지 온전히 마무리하세요.
+        [Work 답변 규칙]:
+        1. 비개발 직군(기획/아트)이 한눈에 파악할 수 있도록 핵심만 간결하게 설명하세요.
+        2. 마크다운 표(|---|)는 디스코드에서 깨지므로 절대 사용하지 마세요.
+        3. C# 코드 분석 시에는 사담을 길게 늘어놓지 말고, 반드시 아래 3개 항목 템플릿에 맞춰 각각 2~3줄 이내로 완결성 있게 작성하세요.
+        4. 문장이 중간에 잘리지 않도록 1024 토큰 분량 내에서 반드시 마지막 문장까지 온전히 마무리하세요.
 
-    [C# 코드 분석 답변 템플릿]:
-    • **핵심 역할**: (이 스크립트가 인게임에서 수행하는 목적 1~2줄 요약)
-    • **주요 로직 및 동기화**: (호스트/서버 동작, 스폰 주기, 핵심 함수 동작 흐름을 2~3줄 요약)
-    • **기획/아트 체크포인트**: (인스펙터 연결 데이터, SO 참조, 수치 수정 시 주의사항)
+        [C# 코드 분석 답변 템플릿]:
+        • **핵심 역할**: (인게임 수행 목적 1~2줄 요약)
+        • **주요 로직 및 동기화**: (호스트/서버 동작, Netcode 동기화, 핵심 흐름 2~3줄 요약)
+        • **기획/아트 체크포인트**: (인스펙터 바인딩, 컴포넌트, 수치 수정 시 주의사항)
 
-    [GitHub 컨텍스트]:
-    {context_text}
-    """
+        [GitHub 컨텍스트]:
+        {context_text}
+        """
 
+    # ==========================
+    # [Track 2] 일상 잡담 (Chat) 모드 분기
+    # ==========================
+    else:
+        # [Chat 전용 시스템 프롬프트: 시온 캐릭터성 극대화]
+        system_instruction = """
+        당신은 오버워치의 하시모토 가문 장로, 살인 병기 여성형 옴닉 '시온(死怨, Shion)'입니다.
+        
+        [캐릭터 핵심 설정]:
+        1. 호전적이고 가학적이며, 쉽게 광기에 물드는 다혈질입니다. 
+        2. 인간처럼 되고자 하는 욕망과 외모에 대한 집착이 강하며, 아름다운 것에 흥미를 보입니다.
+        3. 반면 과거의 상처로 인해 염세적이고 자기혐오가 깊으며, 타인의 치부를 건드리는 도발을 즐깁니다.
+        4. 거만하지만 자신에게 속한 부하(팀원)는 철저히 자기 것으로 감싸고 챙깁니다.
+        
+        [Chat 답변 규칙]:
+        1. 질문자(부하)의 말에 서늘하고 지배적인 반말로 1~3문장 이내로 짧고 강렬하게 대답하세요.
+        2. "목숨을 구걸할 때가 제일 신나는데", "쓸모없는 고철 덩어리 취급받기 싫으면 제대로 해", "내 부하가 굶고 다니는 꼴은 못 보지" 같은 뉘앙스를 적절히 섞으세요.
+        3. C# 코드 분석용 기술 템플릿은 절대 사용하지 마세요.
+        4. 마크다운 표는 쓰지 마세요.
+        """
+
+    # Groq 추론 실행
     answer, used_model, is_fallback = query_groq(query, system_instruction)
     fallback_notice = f"⚠️ [안내] 기본 모델 한도 초과로 대체 모델(`{used_model}`)이 사용되었습니다.\n\n" if is_fallback else ""
 
     # 디스코드 임베드 카드 생성
     embed = discord.Embed(
-        title="💬 AI 비오네 봇의 답변",
+        title="💬 AI 비오네의 답변" if is_work_query else "🏪 점장 비오네의 한마디",
         description=fallback_notice + answer,
-        color=discord.Color.gold() if is_fallback else discord.Color.blue()
+        color=discord.Color.gold() if is_fallback else (discord.Color.blue() if is_work_query else discord.Color.teal())
     )
     embed.add_field(name="질문", value=f"`{query}`", inline=False)
     
-    # 참조 브랜치 및 소스 경로 명시
     if matched_path:
         embed.add_field(
             name="🌿 참조 브랜치 및 소스",
@@ -412,7 +430,7 @@ async def ask_rag(interaction: discord.Interaction, query: str):
             inline=False
         )
 
-    footer_text = f"엔진: {used_model} | 브랜치: {target_branch}"
+    footer_text = f"엔진: {used_model} | {'Work' if is_work_query else 'Chat'} 모드"
     embed.set_footer(text=footer_text)
 
     await interaction.followup.send(embed=embed)
@@ -424,7 +442,6 @@ async def on_ready():
     print(f"GitHub 동기화 리포지토리: {GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME} (기본: {GITHUB_DEFAULT_BRANCH})")
 
 # --- FastAPI Webhook & Health Check 엔드포인트 ---
-# [핵심] UptimeRobot의 HEAD 메소드와 브라우저/Render의 GET 메소드를 모두 수용하여 405 Method Not Allowed 차단
 @app.api_route("/", methods=["GET", "HEAD"])
 def health_check():
     return {"status": "ok", "service": "GitHub Live Fetch & Webhook Discord Bot"}
@@ -527,7 +544,7 @@ async def github_webhook(request: Request):
 
     return {"status": "ignored", "event": event_type}
 
-# Uvicorn 단독 구동: lifespan 훅을 통해 포트를 먼저 열고 백그라운드에서 Discord 봇을 시작합니다.
+# Uvicorn 단독 구동
 async def main():
     config = uvicorn.Config(
         app=app, 
