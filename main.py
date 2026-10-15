@@ -199,8 +199,8 @@ def fetch_branch_activity_summary(target_branch: str = None) -> str:
 
     return "\n\n".join(summary_lines)
 
-# --- Groq LPU 추론 함수 ---
-def query_groq(prompt: str, system_prompt: str) -> tuple[str, str, bool]:
+# query_groq 함수 정의부 수정 (기본값 설정 지원)
+def query_groq(prompt: str, system_prompt: str, temperature: float = 0.2) -> tuple[str, str, bool]:
     fallback_models = ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"]
     last_error = ""
     for idx, model_name in enumerate(fallback_models):
@@ -211,7 +211,7 @@ def query_groq(prompt: str, system_prompt: str) -> tuple[str, str, bool]:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.3,
+                temperature=temperature,
                 max_completion_tokens=1024,
                 top_p=1,
                 stream=False
@@ -394,25 +394,21 @@ async def ask_rag(interaction: discord.Interaction, query: str):
     # [Track 2] 일상 잡담 (Chat) 모드 분기
     # ==========================
     else:
-        # [Chat 전용 시스템 프롬프트: 시온 캐릭터성 극대화]
+        # [Chat 전용 시스템 프롬프트: 앵무새 반복 방지 및 자연스러운 대화 유도]
         system_instruction = """
-        당신은 오버워치의 하시모토 가문 장로, 살인 병기 여성형 옴닉 '시온(死怨, Shion)'입니다.
-        
-        [캐릭터 핵심 설정]:
-        1. 호전적이고 가학적이며, 쉽게 광기에 물드는 다혈질입니다. 
-        2. 인간처럼 되고자 하는 욕망과 외모에 대한 집착이 강하며, 아름다운 것에 흥미를 보입니다.
-        3. 반면 과거의 상처로 인해 염세적이고 자기혐오가 깊으며, 타인의 치부를 건드리는 도발을 즐깁니다.
-        4. 거만하지만 자신에게 속한 부하(팀원)는 철저히 자기 것으로 감싸고 챙깁니다.
-        
-        [Chat 답변 규칙]:
-        1. 질문자(부하)의 말에 서늘하고 지배적인 반말로 1~3문장 이내로 짧고 강렬하게 대답하세요.
-        2. "목숨을 구걸할 때가 제일 신나는데", "쓸모없는 고철 덩어리 취급받기 싫으면 제대로 해", "내 부하가 굶고 다니는 꼴은 못 보지" 같은 뉘앙스를 적절히 섞으세요.
-        3. C# 코드 분석용 기술 템플릿은 절대 사용하지 마세요.
-        4. 마크다운 표는 쓰지 마세요.
+        너는 오버워치 옴닉 야쿠자 장로 '시온(Shion)'이다.
+        상대를 살짝 깔보거나 비꼬는 반말을 기본으로 쓰되, 반드시 '상대방이 한 말의 내용'에 직접 맞받아쳐라.
+
+        [대화 원칙]:
+        1. 정해진 유행어나 대사를 억지로 읊지 말고, 상대의 질문에 상황에 맞게 1~2문장으로 즉답하라.
+        2. 냉소적이고 오만한 태도를 유지하되, 무의미한 협박을 반복하지 마라.
+        3. C# 코드 분석 템플릿(핵심 역할, 동기화 등)이나 마크다운 표는 절대 사용하지 마라.
         """
 
     # Groq 추론 실행
-    answer, used_model, is_fallback = query_groq(query, system_instruction)
+    # Work는 정확성을 위해 0.2, Chat은 자연스러운 대화를 위해 0.7 적용
+    temp = 0.2 if is_work_query else 0.7
+    answer, used_model, is_fallback = query_groq(query, system_instruction, temperature=temp)
     fallback_notice = f"⚠️ [안내] 기본 모델 한도 초과로 대체 모델(`{used_model}`)이 사용되었습니다.\n\n" if is_fallback else ""
 
     # 디스코드 임베드 카드 생성
