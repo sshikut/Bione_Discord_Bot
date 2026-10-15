@@ -199,11 +199,18 @@ def fetch_branch_activity_summary(target_branch: str = None) -> str:
 
     return "\n\n".join(summary_lines)
 
-# query_groq 함수 정의부 수정 (기본값 설정 지원)
-def query_groq(prompt: str, system_prompt: str, temperature: float = 0.2) -> tuple[str, str, bool]:
-    fallback_models = ["openai/gpt-oss-20b", "openai/gpt-oss-120b", "qwen/qwen3.8-27b"]
+# --- Groq 추론 함수 (Work: GPT 120B 우선 / Chat: Qwen 27B 우선) ---
+def query_groq(prompt: str, system_prompt: str, mode: str = "work", temperature: float = 0.2) -> tuple[str, str, bool]:
+    # 제공된 모델 풀 기반 분기 구성
+    if mode == "work":
+        # 코드 분석, 요약, 추론: 대형 고성능 모델 우선
+        model_pool = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
+    else:
+        # 일상 대화, 캐릭터 티키타카: 자연스러운 아시아 언어 구사 모델 우선
+        model_pool = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]
+
     last_error = ""
-    for idx, model_name in enumerate(fallback_models):
+    for idx, model_name in enumerate(model_pool):
         try:
             completion = groq_client.chat.completions.create(
                 model=model_name,
@@ -226,20 +233,19 @@ def query_groq(prompt: str, system_prompt: str, temperature: float = 0.2) -> tup
             return f"Groq 추론 에러: {last_error}", model_name, False
 
     return f"모든 대체 모델의 한도가 초과되었습니다: {last_error}", "None", True
-
 # --- 디스코드 슬래시 커맨드 (/질문) ---
 
 @tree.command(name="질문가이드", description="AI 어시스턴트에게 효과적으로 질문하는 방법과 예시를 안내합니다.")
 async def question_guide(interaction: discord.Interaction):
     embed = discord.Embed(
-        title="📖 던전 편의점 AI 점장 비오네 질문 가이드",
+        title="📖 시온의 질문 가이드",
         description="깃허브 최신 코드 분석부터 일상 잡담까지 자유롭게 물어보세요!",
         color=discord.Color.green()
     )
     embed.add_field(
         name="1️⃣ C# 시스템 스펙 & 데이터 질문 (Work 모드)",
         value=(
-            "• 스크립트명이나 구현 기능을 질문하세요.\n"
+            "• 스크립트명이나 구현 기능을 질문해.\n"
             "• `예시: Develop 브랜치의 NetCargoSpawner.cs 분석해줘`\n"
             "• `예시: 물류 상자 스폰 로직 어떻게 동작해?`"
         ),
@@ -248,7 +254,7 @@ async def question_guide(interaction: discord.Interaction):
     embed.add_field(
         name="2️⃣ 브랜치 & 커밋 현황 질문 (Work 모드)",
         value=(
-            "• '커밋', '브랜치' 키워드를 포함하세요.\n"
+            "• '커밋', '브랜치' 키워드를 포함해.\n"
             "• `예시: 최근 커밋 내역 요약해줘`\n"
             "• `예시: feature/BuildableDisplay 브랜치 최근 작업 뭐야?`"
         ),
@@ -259,7 +265,7 @@ async def question_guide(interaction: discord.Interaction):
         value="• `예시: 오늘 야식 메뉴 추천해줘`, `안녕 반가워!`",
         inline=False
     )
-    embed.set_footer(text="💡 C# 코드 질문 시 3분할 규격 템플릿으로 정밀 요약됩니다.")
+    embed.set_footer(text="💡 C# 코드 질문 시 3분할 규격 템플릿으로 정밀 요약함.")
     await interaction.response.send_message(embed=embed)
 
 @tree.command(name="질문", description="GitHub 최신 코드, 브랜치별 작업 내역 또는 일상 질문을 입력하세요.")
@@ -406,9 +412,17 @@ async def ask_rag(interaction: discord.Interaction, query: str):
         """
 
     # Groq 추론 실행
-    # Work는 정확성을 위해 0.2, Chat은 자연스러운 대화를 위해 0.7 적용
-    temp = 0.2 if is_work_query else 0.7
-    answer, used_model, is_fallback = query_groq(query, system_instruction, temperature=temp)
+    # Work(코드 분석)는 GPT 120B & 낮은 온도(0.2)
+    # Chat(잡담)은 Qwen 27B & 자연스러운 반응을 위한 온도(0.7)
+    current_mode = "work" if is_work_query else "chat"
+    current_temp = 0.2 if is_work_query else 0.7
+
+    answer, used_model, is_fallback = query_groq(
+        prompt=query,
+        system_prompt=system_instruction,
+        mode=current_mode,
+        temperature=current_temp
+    )
     fallback_notice = f"⚠️ [안내] 기본 모델 한도 초과로 대체 모델(`{used_model}`)이 사용되었습니다.\n\n" if is_fallback else ""
 
     # 디스코드 임베드 카드 생성
@@ -479,7 +493,13 @@ async def github_webhook(request: Request):
         커밋 메시지를 바탕으로 게임 플레이, 데이터, 리소스 등에 미치는 핵심 영향도를 1, 2, 3 번호 매김 형식으로 3줄 요약만 작성하세요.
         마크다운 표는 절대 쓰지 말고, 간결하고 명확한 구어체 한국어로 작성하세요.
         """
-        ai_summary, used_model, _ = query_groq(prompt, system_instruction)
+        # 커밋 푸시 요약 호출부
+        ai_summary, used_model, _ = query_groq(
+            prompt=prompt,
+            system_prompt=system_instruction,
+            mode="work",
+            temperature=0.2
+        )
 
         embed = discord.Embed(
             title=f"📦 [{repo_name}] 새로운 커밋 푸시 알림",
@@ -522,7 +542,13 @@ async def github_webhook(request: Request):
         위 PR 내용을 분석하여 기획/아트 팀원이 바로 이해할 수 있도록 어떤 기능이 변경되었는지 3줄 이내로 핵심 요약해줘.
         """
         system_instruction = "PR의 개발 의도와 변경 사항을 비개발 직군도 한눈에 알기 쉽게 1, 2, 3 번호 매김 형식으로 핵심 요약 3줄만 작성하세요. 마크다운 표는 쓰지 마세요."
-        ai_summary, used_model, _ = query_groq(prompt, system_instruction)
+        # PR 머지/오픈 요약 호출부
+        ai_summary, used_model, _ = query_groq(
+            prompt=prompt,
+            system_prompt=system_instruction,
+            mode="work",
+            temperature=0.2
+        )
 
         embed = discord.Embed(
             title=f"{status_title}: #{pr.get('number')} {title}",
